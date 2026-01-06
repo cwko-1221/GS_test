@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>政府理財大作戰 (除錯版)</title>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Microsoft JhengHei', sans-serif; touch-action: none; background: #f0f0f0; }
+        #menuScreen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #fff; z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .btn { padding: 15px 30px; margin: 10px; font-size: 20px; border: none; border-radius: 8px; cursor: pointer; color: white; width: 80%; max-width: 300px; }
+        .btn-student { background: #2196F3; }
+        .btn-teacher { background: #FF9800; }
+        input { padding: 15px; font-size: 18px; border: 2px solid #ddd; border-radius: 8px; margin-bottom: 20px; width: 70%; max-width: 280px; text-align: center; }
+        #teacherScreen, #gameScreen { display: none; width: 100%; height: 100%; }
+        #teacherScreen { padding-top: 20px; text-align: center; overflow-y: auto; }
+        #qrcode { margin: 20px auto; display: flex; justify-content: center; }
+        .rank-item { background: #eee; padding: 10px; margin: 5px auto; width: 80%; border-radius: 5px; text-align: left; font-size: 18px; }
+        #questionModal { display: none; position: fixed; top: 10%; left: 5%; width: 90%; background: white; border: 4px solid #FF5722; border-radius: 15px; padding: 20px; box-sizing: border-box; text-align: center; z-index: 200; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+        .opt-btn { display: block; width: 100%; padding: 12px; margin: 8px 0; background: #4CAF50; color: white; border: none; border-radius: 5px; font-size: 18px; }
+    </style>
+</head>
+<body>
+
+    <div id="menuScreen">
+        <h1>💰 政府理財大作戰</h1>
+        <p style="color:red">系統診斷版 v3</p>
+        <input type="text" id="playerName" placeholder="請輸入學生姓名" maxlength="8">
+        <button class="btn btn-student" onclick="joinGame()">我是學生 (進入遊戲)</button>
+        <br>
+        <button class="btn btn-teacher" onclick="startTeacherMode()">我是老師 (主持遊戲)</button>
+        <div id="debugLog" style="margin-top:20px; font-size:12px; color:#666; width:80%; word-break:break-all;"></div>
+    </div>
+
+    <div id="teacherScreen">
+        <h2>掃描加入遊戲</h2>
+        <div id="qrcode"></div>
+        <h3 id="joinLink"></h3>
+        <p id="teacherStatus" style="color:blue">正在連接資料庫...</p>
+        <button class="btn btn-teacher" onclick="resetGame()" style="background: #f44336;">重置所有玩家</button>
+        <hr>
+        <h3>🏆 實時排行榜</h3>
+        <div id="leaderboard"></div>
+    </div>
+
+    <div id="gameScreen">
+        <canvas id="canvas"></canvas>
+        <div id="questionModal">
+            <h2 id="qTitle">題目</h2>
+            <div id="qOptions"></div>
+        </div>
+    </div>
+
+    <script>
+        // 除錯日誌功能
+        function log(msg) {
+            console.log(msg);
+            document.getElementById('debugLog').innerText += "\n" + msg;
+        }
+
+        // ================= CONFIG (已修正) =================
+        const firebaseConfig = {
+            apiKey: "AIzaSyCpUjL4C66wWr0mP4Xz_g_FvACvjObaUT0",
+            authDomain: "gsmoney-65f2f.firebaseapp.com",
+            projectId: "gsmoney-65f2f",
+            storageBucket: "gsmoney-65f2f.firebasestorage.app",
+            messagingSenderId: "176138167950",
+            appId: "1:176138167950:web:48057a0e2cc89612f30bdf",
+            measurementId: "G-BKB004KPBN"
+        };
+        // ==================================================
+
+        let db, playersRef, gameRef;
+
+        try {
+            firebase.initializeApp(firebaseConfig);
+            db = firebase.database();
+            playersRef = db.ref('players');
+            gameRef = db.ref('gameState');
+            log("Firebase 初始化成功");
+            
+            // 測試連線
+            db.ref('.info/connected').on('value', snap => {
+                if (snap.val() === true) {
+                    log("✅ 成功連線到資料庫伺服器");
+                    document.getElementById('teacherStatus').innerText = "✅ 資料庫連線正常";
+                    document.getElementById('teacherStatus').style.color = "green";
+                } else {
+                    log("⚠️ 正在嘗試連線...");
+                }
+            });
+
+        } catch (e) {
+            alert("嚴重錯誤：Firebase 初始化失敗\n" + e.message);
+            log("初始化失敗: " + e.message);
+        }
+
+        // 題目庫
+        const questions = [
+            { q: "政府理財的首要原則是什麼？", opts: ["量入為出", "先使未來錢", "隨意消費"], ans: 0 },
+            { q: "打工仔每月有薪金，要交什麼稅？", opts: ["利得稅", "薪俸稅", "印花稅"], ans: 1 },
+            { q: "公司賺取利潤後，要交什麼稅？", opts: ["薪俸稅", "印花稅", "利得稅"], ans: 2 },
+            { q: "買賣樓宇住宅時，要交什麼稅？", opts: ["印花稅", "地價稅", "增值稅"], ans: 0 },
+            { q: "政府收入比開支多，稱為？", opts: ["赤字", "盈餘", "破產"], ans: 1 },
+            { q: "「盈餘」會撥入哪裡？", opts: ["財政儲備", "銀行", "官員口袋"], ans: 0 },
+            { q: "以下哪項不是香港主要開支？", opts: ["教育", "軍費", "醫療"], ans: 1 },
+            { q: "興建大橋屬於哪類開支？", opts: ["社會福利", "基礎建設", "保安"], ans: 1 },
+            { q: "享用設施是權利，繳稅是？", opts: ["興趣", "選擇", "義務"], ans: 2 },
+            { q: "長期「入不敷出」會導致？", opts: ["財政赤字", "經濟繁榮", "稅收減少"], ans: 0 }
+        ];
+
+        let myId = null;
+        let me = { x: 0, y: 0, r: 20, color: '' };
+        let allPlayers = {};
+        const WORLD_SIZE = 2000;
+        let canvas, ctx;
+
+        // ================= 老師邏輯 =================
+        function startTeacherMode() {
+            document.getElementById('menuScreen').style.display = 'none';
+            document.getElementById('teacherScreen').style.display = 'block';
+
+            const url = window.location.href;
+            new QRCode(document.getElementById("qrcode"), { text: url, width: 200, height: 200 });
+            document.getElementById("joinLink").innerText = "網址: " + window.location.host;
+
+            // 監聽並捕捉錯誤
+            playersRef.on('value', (snap) => {
+                const list = document.getElementById('leaderboard');
+                list.innerHTML = "";
+                const data = snap.val() || {};
+                const sorted = Object.values(data).sort((a, b) => b.r - a.r);
+                
+                if(sorted.length === 0) list.innerHTML = "<div>等待學生加入...</div>";
+
+                sorted.forEach((p, i) => {
+                    const div = document.createElement('div');
+                    div.className = 'rank-item';
+                    div.innerHTML = `第 ${i+1} 名: <strong>${p.name}</strong> (${Math.floor(p.r)})`;
+                    list.appendChild(div);
+                });
+            }, (error) => {
+                alert("讀取失敗！請檢查 Firebase Rules。\n錯誤代碼：" + error.code);
+            });
+
+            setInterval(() => {
+                const qIdx = Math.floor(Math.random() * questions.length);
+                gameRef.set({
+                    questionId: Date.now(),
+                    index: qIdx,
+                    timestamp: Date.now()
+                }).catch(e => console.error("出題失敗", e));
+            }, 15000);
+        }
+
+        function resetGame() {
+            if(confirm("重置？")) {
+                playersRef.remove().catch(e => alert("重置失敗：" + e.message));
+            }
+        }
+
+        // ================= 學生邏輯 =================
+        function joinGame() {
+            const name = document.getElementById('playerName').value.trim();
+            if(!name) return alert("請輸入名字！");
+            
+            // 嘗試寫入資料庫測試權限
+            const testRef = playersRef.push();
+            myId = testRef.key;
+            me.name = name;
+            me.x = Math.random() * WORLD_SIZE;
+            me.y = Math.random() * WORLD_SIZE;
+            me.color = `hsl(${Math.random() * 360}, 80%, 60%)`;
+
+            testRef.set({
+                name: me.name,
+                x: me.x,
+                y: me.y,
+                r: me.r,
+                color: me.color
+            })
+            .then(() => {
+                // 寫入成功，進入遊戲
+                document.getElementById('menuScreen').style.display = 'none';
+                document.getElementById('gameScreen').style.display = 'block';
+                startGameLoop();
+            })
+            .catch((error) => {
+                // 寫入失敗，彈出警告
+                alert("無法加入遊戲！\n原因：" + error.message + "\n\n請老師檢查 Firebase Database Rules 是否已設為 true。");
+                log("寫入失敗: " + error.message);
+            });
+        }
+
+        function updateMyData() {
+            if(!myId) return;
+            playersRef.child(myId).set({
+                name: me.name,
+                x: me.x,
+                y: me.y,
+                r: me.r,
+                color: me.color
+            }); // 這裡不加 catch 避免 loop 中一直彈窗
+        }
+
+        function startGameLoop() {
+            canvas = document.getElementById('canvas');
+            ctx = canvas.getContext('2d');
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+
+            playersRef.on('value', snap => {
+                allPlayers = snap.val() || {};
+                checkCollisions();
+            });
+
+            gameRef.on('value', snap => {
+                const data = snap.val();
+                if(data && Date.now() - data.timestamp < 5000) {
+                    showQuestion(data.index);
+                }
+            });
+
+            requestAnimationFrame(gameLoop);
+            setInterval(updateMyData, 100);
+            
+            // 綁定輸入
+            window.addEventListener('mousemove', e => { mouseX = e.clientX; mouseY = e.clientY; });
+            window.addEventListener('touchmove', e => {
+                e.preventDefault();
+                mouseX = e.touches[0].clientX;
+                mouseY = e.touches[0].clientY;
+            }, {passive: false});
+        }
+
+        let mouseX = window.innerWidth / 2, mouseY = window.innerHeight / 2;
+
+        function gameLoop() {
+            const dx = mouseX - window.innerWidth / 2;
+            const dy = mouseY - window.innerHeight / 2;
+            const angle = Math.atan2(dy, dx);
+            const speed = 50 / me.r + 2; 
+
+            me.x += Math.cos(angle) * speed;
+            me.y += Math.sin(angle) * speed;
+            me.x = Math.max(0, Math.min(WORLD_SIZE, me.x));
+            me.y = Math.max(0, Math.min(WORLD_SIZE, me.y));
+
+            drawGame();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function drawGame() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.save();
+            ctx.translate(canvas.width/2 - me.x, canvas.height/2 - me.y);
+            ctx.strokeStyle = "#ccc";
+            ctx.strokeRect(0, 0, WORLD_SIZE, WORLD_SIZE);
+
+            for (let id in allPlayers) {
+                const p = allPlayers[id];
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+                ctx.fillStyle = p.color;
+                ctx.fill();
+                ctx.fillStyle = "#000";
+                ctx.font = "16px Arial";
+                ctx.textAlign = "center";
+                ctx.fillText(p.name, p.x, p.y - p.r - 5);
+            }
+            ctx.restore();
+        }
+
+        function checkCollisions() {
+            for (let id in allPlayers) {
+                if (id === myId) continue;
+                const p = allPlayers[id];
+                const dist = Math.hypot(me.x - p.x, me.y - p.y);
+                if (dist < me.r && me.r > p.r * 1.2) {
+                    me.r += p.r * 0.2; 
+                    playersRef.child(id).remove();
+                }
+            }
+            if (!allPlayers[myId] && myId) {
+                me.x = Math.random() * WORLD_SIZE;
+                me.y = Math.random() * WORLD_SIZE;
+                me.r = 20;
+                // updateMyData 會在 loop 中自動修復
+            }
+        }
+
+        function showQuestion(index) {
+            const q = questions[index];
+            const modal = document.getElementById('questionModal');
+            const content = document.getElementById('qOptions');
+            document.getElementById('qTitle').innerText = q.q;
+            content.innerHTML = "";
+            modal.style.display = 'block';
+
+            q.opts.forEach((opt, i) => {
+                const btn = document.createElement('button');
+                btn.className = 'opt-btn';
+                btn.innerText = opt;
+                btn.onclick = () => {
+                    modal.style.display = 'none';
+                    if (i === q.ans) {
+                        me.r += 10; 
+                        alert("答對了！體積變大！");
+                    } else {
+                        alert("答錯了...");
+                    }
+                };
+                content.appendChild(btn);
+            });
+        }
+    </script>
+</body>
+</html>
