@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>政府理財大作戰 (連線版)</title>
+    
+    <!-- 1. 引入 Firebase (使用舊版 SDK 以確保單一檔案相容性) -->
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+    
+    <!-- 2. QR Code -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    
+    <style>
+        /* 沿用單機版的漂亮樣式 */
+        body { margin: 0; overflow: hidden; font-family: 'Microsoft JhengHei', sans-serif; touch-action: none; background: #f0f0f0; user-select: none; -webkit-user-select: none; }
+        .screen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: opacity 0.3s; }
+        .hidden { display: none !important; opacity: 0; }
+        h1 { color: #2c3e50; margin-bottom: 5px; text-shadow: 2px 2px 4px rgba(0,0,0,0.1); }
+        h2 { color: #34495e; font-size: 1.2rem; margin-bottom: 20px; }
+        input { padding: 15px; font-size: 20px; border: 3px solid #ddd; border-radius: 12px; margin-bottom: 20px; width: 80%; max-width: 300px; text-align: center; outline: none; }
+        input:focus { border-color: #2196F3; }
+        .btn { padding: 15px 40px; margin: 10px; font-size: 20px; border: none; border-radius: 50px; cursor: pointer; color: white; width: 85%; max-width: 350px; box-shadow: 0 6px 0 rgba(0,0,0,0.1); font-weight: bold; }
+        .btn:active { transform: translateY(4px); box-shadow: none; }
+        .btn-student { background: linear-gradient(to bottom, #4facfe 0%, #00f2fe 100%); }
+        .btn-teacher { background: linear-gradient(to bottom, #ff9a9e 0%, #fecfef 99%, #fecfef 100%); color: #444; }
+        .btn-reset { background: #ff5252; font-size: 16px; padding: 10px 20px; margin-top: 20px; }
+        
+        #qrcode { margin: 20px; padding: 10px; background: white; border-radius: 10px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
+        
+        /* 遊戲介面 */
+        canvas { background: #eee; display: block; }
+        #hud { position: absolute; top: 10px; left: 10px; pointer-events: none; z-index: 5; display: flex; flex-direction: column; gap: 5px; }
+        .hud-box { background: rgba(0,0,0,0.6); color: white; padding: 8px 15px; border-radius: 20px; font-weight: bold; font-size: 16px; }
+        
+        /* 題目彈窗 */
+        #questionModal { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 90%; max-width: 450px; background: white; border: 6px solid #FF9800; border-radius: 20px; padding: 20px; box-sizing: border-box; text-align: center; z-index: 100; box-shadow: 0 0 100px rgba(0,0,0,0.7); }
+        #qTitle { font-size: 22px; margin-bottom: 15px; font-weight: bold; }
+        .opt-btn { display: block; width: 100%; padding: 15px; margin: 8px 0; background: #fff; color: #333; border: 2px solid #ddd; border-radius: 10px; font-size: 18px; cursor: pointer; font-weight: bold; }
+        .opt-btn:active { background: #4CAF50; color: white; }
+
+        /* 老師排行榜 */
+        #leaderboard { width: 90%; max-width: 500px; max-height: 400px; overflow-y: auto; background: rgba(255,255,255,0.9); border-radius: 10px; padding: 10px; margin-top: 10px; }
+        .rank-row { display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #eee; font-size: 18px; }
+        .rank-row:first-child { color: #d35400; font-weight: bold; }
+
+        /* 狀態列 */
+        #status-bar { position: fixed; bottom: 0; width: 100%; background: #333; color: white; text-align: center; padding: 5px; font-size: 12px; z-index: 200; }
+    </style>
+</head>
+<body>
+
+    <!-- 1. 主選單 -->
+    <div id="menuScreen" class="screen">
+        <div style="font-size: 60px; margin-bottom: 10px;">🌏</div>
+        <h1>政府理財大作戰</h1>
+        <h2>多人連線版</h2>
+        
+        <input type="text" id="playerName" placeholder="請輸入學生名字" maxlength="8">
+        
+        <button class="btn btn-student" onclick="joinGame()">我是學生 (加入遊戲)</button>
+        <button class="btn btn-teacher" onclick="startTeacherMode()">我是老師 (主持遊戲)</button>
+        
+        <p style="font-size: 12px; color: #666; margin-top: 20px;">請確保 Firebase Config 已設定且 Rules 為 true</p>
+    </div>
+
+    <!-- 2. 老師畫面 -->
+    <div id="teacherScreen" class="screen hidden">
+        <h2>📱 掃描加入遊戲</h2>
+        <div id="qrcode"></div>
+        <div style="background: white; padding: 5px 15px; border-radius: 5px; font-family: monospace;">
+            <span id="urlText"></span>
+        </div>
+        
+        <h3>🏆 即時排行榜 (<span id="playerCount">0</span>人)</h3>
+        <div id="leaderboard">等待學生加入...</div>
+        
+        <button class="btn btn-reset" onclick="resetServer()">踢除所有玩家並重置</button>
+        <button class="btn btn-student" style="background:#999; margin-top:10px; font-size:14px; padding:10px;" onclick="location.reload()">返回選單</button>
+    </div>
+
+    <!-- 3. 學生遊戲畫面 -->
+    <div id="gameUI" class="hidden">
+        <canvas id="canvas"></canvas>
+        <div id="hud">
+            <div class="hud-box">👤 <span id="hudName">Player</span></div>
+            <div class="hud-box">📊 分數: <span id="hudScore">0</span></div>
+        </div>
+        <!-- 題目 -->
+        <div id="questionModal">
+            <div style="font-size: 40px; margin-bottom: 10px;">❓</div>
+            <h2 id="qTitle">題目載入中...</h2>
+            <div id="qOptions"></div>
+        </div>
+    </div>
+
+    <div id="status-bar">等待 Firebase 連線...</div>
+
+    <script>
+        // =========================================================
+        // 🔴🔴🔴 請在這裡填入你的 FIREBASE CONFIG 🔴🔴🔴
+        // =========================================================
+	const firebaseConfig = {
+  		apiKey: "AIzaSyCpUjL4C66wWr0mP4Xz_g_FvACvjObaUT0",
+  		authDomain: "gsmoney-65f2f.firebaseapp.com",
+  		projectId: "gsmoney-65f2f",
+  		storageBucket: "gsmoney-65f2f.firebasestorage.app",
+ 		 messagingSenderId: "176138167950",
+  		appId: "1:176138167950:web:48057a0e2cc89612f30bdf",
+  		measurementId: "G-BKB004KPBN"
+	};
+        // =========================================================
+
+        // 檢查設定
+        if (!firebaseConfig.apiKey) {
+            alert("⚠️ 錯誤：請編輯程式碼，在第 140 行填入你的 firebaseConfig！");
+        } else if (!firebaseConfig.databaseURL) {
+            alert("⚠️ 錯誤：Config 中缺少 databaseURL，遊戲無法運作！");
+        } else {
+            firebase.initializeApp(firebaseConfig);
+        }
+
+        const db = firebase.database();
+        const playersRef = db.ref('players');
+        const gameRef = db.ref('gameState');
+        const connectedRef = db.ref('.info/connected');
+
+        // 監聽連線狀態
+        connectedRef.on('value', (snap) => {
+            const bar = document.getElementById('status-bar');
+            if (snap.val() === true) {
+                bar.innerText = "✅ 已連線到伺服器";
+                bar.style.background = "#4CAF50";
+            } else {
+                bar.innerText = "⚠️ 斷線重連中...";
+                bar.style.background = "#F44336";
+            }
+        });
+
+        // 題目庫
+        const questions = [
+            { q: "政府理財的首要原則是什麼？", opts: ["量入為出", "先使未來錢", "隨意消費"], ans: 0 },
+            { q: "打工仔每月有薪金，要交什麼稅？", opts: ["利得稅", "薪俸稅", "印花稅"], ans: 1 },
+            { q: "公司賺取利潤後，要交什麼稅？", opts: ["薪俸稅", "印花稅", "利得稅"], ans: 2 },
+            { q: "買賣樓宇住宅時，要交什麼稅？", opts: ["印花稅", "地價稅", "增值稅"], ans: 0 },
+            { q: "「盈餘」會撥入哪裡？", opts: ["財政儲備", "銀行", "官員口袋"], ans: 0 },
+            { q: "以下哪項不是香港主要開支？", opts: ["教育", "軍費", "醫療"], ans: 1 },
+        ];
+
+        // 遊戲變數
+        const WORLD_SIZE = 2500;
+        let myId = null;
+        let me = { x: 0, y: 0, r: 25, color: '#00f', name: '' };
+        let allPlayers = {};
+        let canvas, ctx;
+        let mouseX = 0, mouseY = 0;
+        let lastUploadTime = 0;
+
+        // ================= 老師功能 =================
+        function startTeacherMode() {
+            document.getElementById('menuScreen').classList.add('hidden');
+            document.getElementById('teacherScreen').classList.remove('hidden');
+
+            const url = window.location.href;
+            document.getElementById('urlText').innerText = window.location.host;
+            new QRCode(document.getElementById("qrcode"), { text: url, width: 200, height: 200 });
+
+            // 監聽並更新排行榜
+            playersRef.on('value', snap => {
+                const list = document.getElementById('leaderboard');
+                const data = snap.val() || {};
+                const sorted = Object.values(data).sort((a, b) => b.r - a.r);
+                
+                document.getElementById('playerCount').innerText = sorted.length;
+                list.innerHTML = "";
+                
+                if(sorted.length === 0) {
+                    list.innerHTML = "<div style='text-align:center; color:#888;'>等待學生加入...</div>";
+                    return;
+                }
+
+                sorted.forEach((p, i) => {
+                    const div = document.createElement('div');
+                    div.className = 'rank-row';
+                    div.innerHTML = `<span>#${i+1} ${p.name}</span> <span>${Math.floor(p.r)}</span>`;
+                    list.appendChild(div);
+                });
+            }, error => {
+                alert("無法讀取資料庫，請檢查 Rules 是否設為 true。\n" + error.message);
+            });
+
+            // 定時出題 (每15秒)
+            setInterval(() => {
+                const qIdx = Math.floor(Math.random() * questions.length);
+                gameRef.set({
+                    qid: Date.now(),
+                    idx: qIdx
+                });
+            }, 15000);
+        }
+
+        function resetServer() {
+            if(confirm("確定要踢除所有學生並重置遊戲嗎？")) {
+                playersRef.remove();
+                gameRef.remove();
+            }
+        }
+
+        // ================= 學生功能 =================
+        function joinGame() {
+            const name = document.getElementById('playerName').value.trim();
+            if(!name) return alert("請輸入名字！");
+
+            // 嘗試寫入以測試權限
+            const newRef = playersRef.push();
+            myId = newRef.key;
+            me.name = name;
+            me.x = Math.random() * WORLD_SIZE;
+            me.y = Math.random() * WORLD_SIZE;
+            me.color = `hsl(${Math.random() * 360}, 80%, 60%)`;
+
+            newRef.set(me)
+                .then(() => {
+                    startGame();
+                })
+                .catch(e => {
+                    alert("加入失敗！請老師檢查 Firebase 權限。\n" + e.message);
+                });
+            
+            // 斷線時自動刪除自己
+            newRef.onDisconnect().remove();
+        }
+
+        function startGame() {
+            document.getElementById('menuScreen').classList.add('hidden');
+            document.getElementById('gameUI').classList.remove('hidden');
+            document.getElementById('hudName').innerText = me.name;
+
+            canvas = document.getElementById('canvas');
+            ctx = canvas.getContext('2d');
+            resize();
+            window.addEventListener('resize', resize);
+
+            // 監聽所有玩家
+            playersRef.on('value', snap => {
+                allPlayers = snap.val() || {};
+                // 如果自己被刪除了 (被吃掉)
+                if(!allPlayers[myId] && myId) {
+                    respawn();
+                }
+            });
+
+            // 監聽題目
+            gameRef.on('value', snap => {
+                const data = snap.val();
+                if(data && Date.now() - data.qid < 5000) { // 5秒內的題目
+                    showQuestion(data.idx);
+                }
+            });
+
+            // 輸入綁定
+            window.addEventListener('mousemove', e => { mouseX = e.clientX; mouseY = e.clientY; });
+            window.addEventListener('touchmove', e => { 
+                e.preventDefault(); 
+                mouseX = e.touches[0].clientX; 
+                mouseY = e.touches[0].clientY; 
+            }, {passive: false});
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        function respawn() {
+            me.x = Math.random() * WORLD_SIZE;
+            me.y = Math.random() * WORLD_SIZE;
+            me.r = 25;
+            playersRef.child(myId).set(me);
+            // 簡單特效
+            document.body.style.background = "red";
+            setTimeout(() => document.body.style.background = "#f0f0f0", 200);
+        }
+
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            if(!myId) { mouseX = canvas.width/2; mouseY = canvas.height/2; }
+        }
+
+        function gameLoop() {
+            if(!myId) return;
+
+            // 1. 本地移動 (預測)
+            const dx = mouseX - canvas.width / 2;
+            const dy = mouseY - canvas.height / 2;
+            const angle = Math.atan2(dy, dx);
+            const speed = Math.max(2, 8 - (me.r / 50)); // 越大越慢
+            
+            const distMouse = Math.hypot(dx, dy);
+            if(distMouse > 10) {
+                me.x += Math.cos(angle) * speed;
+                me.y += Math.sin(angle) * speed;
+            }
+
+            // 邊界
+            me.x = Math.max(0, Math.min(WORLD_SIZE, me.x));
+            me.y = Math.max(0, Math.min(WORLD_SIZE, me.y));
+
+            // 2. 上傳位置 (每 50ms 一次，減少流量)
+            const now = Date.now();
+            if(now - lastUploadTime > 50) {
+                playersRef.child(myId).update({
+                    x: Math.round(me.x),
+                    y: Math.round(me.y),
+                    r: me.r
+                });
+                lastUploadTime = now;
+            }
+
+            // 3. 碰撞判定 (Client Side Trust)
+            checkCollisions();
+
+            // 4. 繪圖
+            draw();
+            
+            // 更新 HUD
+            document.getElementById('hudScore').innerText = Math.floor(me.r);
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        function checkCollisions() {
+            for (let id in allPlayers) {
+                if (id === myId) continue;
+                const p = allPlayers[id];
+                const dist = Math.hypot(me.x - p.x, me.y - p.y);
+
+                // 吃掉別人：距離 < 半徑 且 我比你大 10%
+                if (dist < me.r && me.r > p.r * 1.1) {
+                    me.r += p.r * 0.4; // 吸收
+                    // 執行刪除 (Firebase)
+                    playersRef.child(id).remove();
+                }
+            }
+        }
+
+        function showQuestion(idx) {
+            const q = questions[idx];
+            const modal = document.getElementById('questionModal');
+            const content = document.getElementById('qOptions');
+            
+            document.getElementById('qTitle').innerText = q.q;
+            content.innerHTML = "";
+            modal.style.display = 'block';
+
+            q.opts.forEach((opt, i) => {
+                const btn = document.createElement('button');
+                btn.className = 'opt-btn';
+                btn.innerText = opt;
+                btn.onclick = () => {
+                    modal.style.display = 'none';
+                    if(i === q.ans) {
+                        me.r += 15; // 獎勵
+                        alert("✅ 答對了！變大！");
+                    } else {
+                        me.r = Math.max(10, me.r - 5);
+                        alert("❌ 答錯了...變小");
+                    }
+                    // 強制更新一次以免大小不同步
+                    playersRef.child(myId).update({ r: me.r });
+                };
+                content.appendChild(btn);
+            });
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // 背景格線
+            ctx.save();
+            const camX = me.x - canvas.width / 2;
+            const camY = me.y - canvas.height / 2;
+            ctx.translate(-camX, -camY);
+
+            // 畫邊界
+            ctx.strokeStyle = "#ff0000";
+            ctx.lineWidth = 5;
+            ctx.strokeRect(0, 0, WORLD_SIZE, WORLD_SIZE);
+            
+            // 畫網格
+            ctx.strokeStyle = "#ddd";
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            for(let x=0; x<=WORLD_SIZE; x+=50) { ctx.moveTo(x,0); ctx.lineTo(x,WORLD_SIZE); }
+            for(let y=0; y<=WORLD_SIZE; y+=50) { ctx.moveTo(0,y); ctx.lineTo(WORLD_SIZE,y); }
+            ctx.stroke();
+
+            // 畫所有玩家
+            for (let id in allPlayers) {
+                const p = allPlayers[id];
+                const isMe = (id === myId);
+                
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+                ctx.fillStyle = p.color || "#999";
+                ctx.fill();
+                
+                // 名字
+                ctx.fillStyle = "#333";
+                ctx.font = isMe ? "bold 16px sans-serif" : "14px sans-serif";
+                ctx.textAlign = "center";
+                ctx.fillText(p.name, p.x, p.y - p.r - 5);
+                
+                if(isMe) {
+                    ctx.strokeStyle = "#fff";
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+                }
+            }
+            ctx.restore();
+        }
+    </script>
+</body>
+</html>
