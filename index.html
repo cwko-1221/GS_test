@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>常識雲端賽 - 優化版</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        body { font-family: '微軟正黑體', sans-serif; margin: 0; padding: 0; background-color: #f0f3f4; touch-action: none; user-select: none; -webkit-user-select: none; }
+        
+        /* 通用按鈕 */
+        .big-btn { padding: 15px 30px; font-size: 1.2rem; border: none; border-radius: 10px; cursor: pointer; color: white; transition: 0.2s; box-shadow: 0 4px 0 rgba(0,0,0,0.2); }
+        .big-btn:active { transform: translateY(4px); box-shadow: none; }
+        .green-btn { background: #2ecc71; }
+        .blue-btn { background: #3498db; }
+
+        /* 首頁 */
+        #role-select { display: flex; flex-direction: column; height: 100vh; justify-content: center; align-items: center; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); gap: 20px; }
+        
+        /* 老師端 */
+        #host-screen { display: none; padding: 20px; background-color: #2c3e50; min-height: 100vh; color: white; }
+        .host-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 2px solid #34495e; padding-bottom: 10px; }
+        #qr-container { background: white; padding: 10px; border-radius: 10px; }
+        
+        /* 排行榜 */
+        #leaderboard { display: flex; flex-direction: column; gap: 10px; }
+        .rank-card { display: flex; align-items: center; background: #34495e; padding: 10px 20px; border-radius: 10px; position: relative; border: 1px solid #465c71; }
+        .rank-num { font-size: 1.5rem; font-weight: bold; width: 40px; color: #f1c40f; }
+        .rank-avatar { font-size: 2rem; margin-right: 15px; }
+        .rank-info { flex: 1; }
+        .rank-name { font-size: 1.2rem; font-weight: bold; }
+        .rank-score { font-size: 1rem; color: #bdc3c7; }
+        .rank-bar { height: 6px; background: #e74c3c; width: 0%; border-radius: 5px; margin-top: 5px; transition: width 0.5s; }
+
+        /* 學生端 (遊戲) */
+        #client-screen { display: none; height: 100vh; background: #ecf0f1; overflow: hidden; position: relative; }
+        canvas { display: block; margin: 0 auto; background: linear-gradient(to bottom, #87CEEB, #E0F7FA); }
+        
+        #game-ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+        #score-display { position: absolute; top: 15px; left: 15px; font-size: 1.8rem; font-weight: bold; color: #2c3e50; text-shadow: 2px 2px 0px white; }
+        
+        /* 控制按鈕區 */
+        #controls { position: absolute; bottom: 0; width: 100%; height: 120px; pointer-events: auto; display: flex; justify-content: space-between; padding: 0 20px; box-sizing: border-box; align-items: center; }
+        .control-btn { width: 90px; height: 90px; background: rgba(0,0,0,0.15); border-radius: 50%; font-size: 2.5rem; border: 2px solid white; color: white; display: flex; justify-content: center; align-items: center; touch-action: manipulation; }
+        .control-btn:active { background: rgba(0,0,0,0.4); transform: scale(0.95); }
+
+        /* 道具按鈕 */
+        #power-btn { 
+            position: absolute; bottom: 140px; right: 20px; width: 70px; height: 70px; 
+            background: #e74c3c; border-radius: 50%; border: 4px solid white; color: white; font-size: 2rem; 
+            display: flex; justify-content: center; align-items: center; pointer-events: auto; animation: pulse 2s infinite; 
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3); cursor: pointer;
+        }
+
+        /* 登入畫面 */
+        #login-box { 
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 50; 
+            background: rgba(44, 62, 80, 0.95); display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 20px;
+        }
+        input { padding: 15px; font-size: 1.3rem; text-align: center; border-radius: 10px; border: none; width: 70%; }
+
+        /* 遊戲結束 & 答題彈窗 (共用樣式) */
+        .overlay { 
+            display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
+            background: rgba(0,0,0,0.85); z-index: 100; justify-content: center; align-items: center; flex-direction: column; pointer-events: auto;
+        }
+        .modal-box { background: white; padding: 25px; border-radius: 15px; width: 85%; max-width: 350px; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+        .option-btn { display: block; width: 100%; padding: 15px; margin: 10px 0; background: #3498db; color: white; border: none; border-radius: 8px; font-size: 1.2rem; cursor: pointer; }
+        
+        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
+    </style>
+</head>
+<body>
+
+    <div id="role-select">
+        <h1 style="color:white; font-size: 2.5rem; text-shadow: 0 2px 5px rgba(0,0,0,0.2);">☁️ 常識雲端賽</h1>
+        <button class="big-btn green-btn" onclick="initTeacher()">我是老師 (開啟排行榜)</button>
+        <p style="color:white; opacity: 0.8; margin-top:20px">學生請掃描 QR Code 加入</p>
+    </div>
+
+    <div id="host-screen">
+        <div class="host-header">
+            <div>
+                <h1>🏆 即時排行榜</h1>
+                <h3 style="color:#bdc3c7">房間 ID: <span id="room-id" style="color:#f1c40f">...</span></h3>
+            </div>
+            <div id="qr-container">
+                <div id="qrcode"></div>
+            </div>
+        </div>
+        <div id="leaderboard"></div>
+    </div>
+
+    <div id="client-screen">
+        <canvas id="gameCanvas"></canvas>
+        
+        <div id="game-ui">
+            <div id="score-display">0 m</div>
+            <div id="power-btn" onclick="openQuiz()">🚀</div>
+            <div id="controls">
+                <button class="control-btn" ontouchstart="inputLeft=true" ontouchend="inputLeft=false" onmousedown="inputLeft=true" onmouseup="inputLeft=false">⬅️</button>
+                <button class="control-btn" ontouchstart="inputRight=true" ontouchend="inputRight=false" onmousedown="inputRight=true" onmouseup="inputRight=false">➡️</button>
+            </div>
+        </div>
+
+        <div id="login-box">
+            <h2 style="color:white">準備起飛！</h2>
+            <div style="font-size:4rem; margin-bottom:10px;" id="avatar-preview">🐵</div>
+            <div style="display:flex; gap:15px; margin-bottom:20px;">
+                <button style="font-size:2rem; background:none; border:none; cursor:pointer" onclick="setAvatar('🐵')">🐵</button>
+                <button style="font-size:2rem; background:none; border:none; cursor:pointer" onclick="setAvatar('🐰')">🐰</button>
+                <button style="font-size:2rem; background:none; border:none; cursor:pointer" onclick="setAvatar('🦊')">🦊</button>
+                <button style="font-size:2rem; background:none; border:none; cursor:pointer" onclick="setAvatar('🐷')">🐷</button>
+            </div>
+            <input type="text" id="username" placeholder="輸入你的名字">
+            <button class="big-btn green-btn" style="margin-top:20px; width: 70%;" onclick="firstStart()">開始遊戲</button>
+        </div>
+
+        <div id="game-over-overlay" class="overlay">
+            <div class="modal-box">
+                <h2 style="color:#e74c3c">😵 掉下來了！</h2>
+                <p style="font-size:1.2rem; color:#34495e">你的高度: <span id="final-score" style="font-weight:bold; font-size:2rem">0</span> m</p>
+                <br>
+                <button class="big-btn green-btn" style="width:100%" onclick="resetGame()">再玩一次 🔄</button>
+            </div>
+        </div>
+
+        <div id="quiz-overlay" class="overlay">
+            <div class="modal-box">
+                <h3 id="q-text" style="color:#2c3e50; margin-bottom:15px">題目載入中...</h3>
+                <div id="q-options"></div>
+            </div>
+        </div>
+    </div>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+    import { getFirestore, collection, doc, setDoc, onSnapshot, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+    // TODO: 老師請在此替換您的 Firebase Config
+const firebaseConfig = {
+  apiKey: "AIzaSyCpUjL4C66wWr0mP4Xz_g_FvACvjObaUT0",
+  authDomain: "gsmoney-65f2f.firebaseapp.com",
+  projectId: "gsmoney-65f2f",
+  storageBucket: "gsmoney-65f2f.firebasestorage.app",
+  messagingSenderId: "176138167950",
+  appId: "1:176138167950:web:48057a0e2cc89612f30bdf",
+  measurementId: "G-BKB004KPBN"
+};
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    // 全局變數
+    let roomId = null;
+    let myId = "p_" + Math.random().toString(36).substr(2, 6);
+    let myAvatar = "🐵";
+    let myName = "";
+    
+    // 檢查網址參數
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('room')) {
+        roomId = urlParams.get('room');
+        initStudentUI();
+    }
+
+    // ================= 老師端邏輯 =================
+    window.initTeacher = () => {
+        document.getElementById('role-select').style.display = 'none';
+        document.getElementById('host-screen').style.display = 'block';
+
+        roomId = Math.floor(1000 + Math.random() * 9000).toString();
+        document.getElementById('room-id').innerText = roomId;
+
+        const url = window.location.href.split('?')[0] + "?room=" + roomId;
+        new QRCode(document.getElementById("qrcode"), { text: url, width: 120, height: 120 });
+
+        const playersRef = collection(db, 'rooms', roomId, 'players');
+        onSnapshot(playersRef, (snapshot) => {
+            const players = [];
+            snapshot.forEach(doc => players.push(doc.data()));
+            players.sort((a, b) => b.score - a.score);
+            updateLeaderboard(players);
+        });
+    };
+
+    function updateLeaderboard(players) {
+        const board = document.getElementById('leaderboard');
+        board.innerHTML = ""; 
+        const maxScore = players.length > 0 ? Math.max(players[0].score, 100) : 100;
+
+        players.forEach((p, index) => {
+            const widthPercent = Math.min((p.score / maxScore) * 100, 100);
+            const card = document.createElement('div');
+            card.className = 'rank-card';
+            card.innerHTML = `
+                <div class="rank-num">${index + 1}</div>
+                <div class="rank-avatar">${p.avatar}</div>
+                <div class="rank-info">
+                    <div style="display:flex; justify-content:space-between;">
+                        <span class="rank-name">${p.name}</span>
+                        <span class="rank-score">${Math.floor(p.score)} m</span>
+                    </div>
+                    <div class="rank-bar" style="width: ${widthPercent}%;"></div>
+                </div>
+            `;
+            board.appendChild(card);
+        });
+    }
+
+    // ================= 學生端邏輯 (遊戲核心) =================
+    
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    // 遊戲物理變數
+    let player = { x: 0, y: 0, w: 40, h: 40, vx: 0, vy: 0 };
+    let platforms = [];
+    let cameraY = 0;
+    let score = 0;
+    let isGameOver = false;
+    let isPaused = false;
+    
+    // 輸入狀態
+    window.inputLeft = false;
+    window.inputRight = false;
+    
+    const questions = [
+        {q: "流感高峰期要？", o:["戴口罩", "不洗手", "熬夜"], a: 0},
+        {q: "火警打幾號？", o:["999", "911", "112"], a: 0},
+        {q: "哪種不是哺乳類？", o:["海豚", "鱷魚", "熊貓"], a: 1},
+        {q: "過馬路看？", o:["手機", "紅綠燈", "天空"], a: 1}
+    ];
+
+    function initStudentUI() {
+        document.getElementById('role-select').style.display = 'none';
+        document.getElementById('client-screen').style.display = 'block';
+    }
+
+    window.setAvatar = (char) => {
+        myAvatar = char;
+        document.getElementById('avatar-preview').innerText = char;
+    }
+
+    // 第一次開始遊戲 (需要輸入名字)
+    window.firstStart = async () => {
+        const name = document.getElementById('username').value.trim();
+        if (!name) return alert("請輸入名字");
+        myName = name;
+        document.getElementById('login-box').style.display = 'none';
+        
+        // 寫入初始資料
+        await setDoc(doc(db, 'rooms', roomId, 'players', myId), {
+            name: myName,
+            avatar: myAvatar,
+            score: 0
+        });
+
+        resetGame(); // 初始化遊戲變數
+        requestAnimationFrame(update); // 啟動迴圈
+
+        // 定時上傳分數
+        setInterval(() => {
+            if (!isGameOver && score > 0) {
+                updateDoc(doc(db, 'rooms', roomId, 'players', myId), { score: Math.floor(score) });
+            }
+        }, 1500);
+    };
+
+    // 重置遊戲 (復活)
+    window.resetGame = () => {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        isGameOver = false;
+        isPaused = false;
+        score = 0;
+        cameraY = 0;
+        document.getElementById('game-over-overlay').style.display = 'none';
+        document.getElementById('score-display').innerText = "0 m";
+
+        // 重置玩家位置
+        player.x = canvas.width / 2 - 20;
+        player.y = canvas.height - 150;
+        player.vx = 0;
+        player.vy = 0;
+
+        // 生成初始平台
+        platforms = [];
+        
+        // *** 關鍵修正：安全地板 ***
+        // 在最底下生成一個寬度等於 canvas.width 的平台，防止開場即死
+        platforms.push({ x: 0, y: canvas.height - 50, w: canvas.width, h: 20 });
+
+        // 生成其他隨機平台
+        for(let i=1; i<12; i++) {
+            platforms.push({ 
+                x: Math.random() * (canvas.width - 70), 
+                y: canvas.height - 50 - i * 90, // 間距稍微拉近一點點
+                w: 70, // 平台稍微加寬，降低難度
+                h: 15 
+            });
+        }
+        
+        // 歸零資料庫分數
+        updateDoc(doc(db, 'rooms', roomId, 'players', myId), { score: 0 });
+    };
+
+    function update() {
+        if (isGameOver || isPaused) {
+            requestAnimationFrame(update);
+            return;
+        }
+
+        // 1. 清空畫布
+        ctx.fillStyle = "#E0F7FA";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        // 2. 玩家移動 (修正靈敏度)
+        // 使用 4.5 而不是 6，速度更受控
+        if (window.inputLeft) player.vx = -4.5;
+        else if (window.inputRight) player.vx = 4.5;
+        else player.vx *= 0.85; // 增加摩擦力，讓煞車更順滑
+
+        player.x += player.vx;
+        player.vy += 0.45; // 重力稍微調低一點點，跳得比較輕盈
+        player.y += player.vy;
+
+        // 穿牆機制
+        if (player.x < -30) player.x = canvas.width;
+        if (player.x > canvas.width) player.x = -30;
+
+        // 3. 平台碰撞 (只在下落時)
+        if (player.vy > 0) {
+            platforms.forEach(p => {
+                if (
+                    player.x + 20 > p.x && 
+                    player.x + 20 < p.x + p.w &&
+                    player.y + 40 > p.y && 
+                    player.y + 40 < p.y + p.h + 15 // 增加判定範圍，更容易踩到
+                ) {
+                    player.vy = -11; // 彈跳力
+                }
+            });
+        }
+
+        // 4. 相機移動 & 平台生成
+        if (player.y < canvas.height / 2) {
+            let diff = (canvas.height / 2) - player.y;
+            player.y = canvas.height / 2;
+            cameraY += diff;
+            score += diff / 10;
+            
+            platforms.forEach(p => p.y += diff);
+            platforms = platforms.filter(p => p.y < canvas.height); // 移除螢幕外的
+            
+            // 補充新平台
+            while (platforms.length < 12) {
+                platforms.push({
+                    x: Math.random() * (canvas.width - 70),
+                    y: -20 - Math.random() * 60,
+                    w: 70, h: 15
+                });
+            }
+        }
+
+        // 5. 死亡判定
+        if (player.y > canvas.height) {
+            showGameOver();
+        }
+
+        // 6. 繪圖
+        // 畫平台
+        ctx.fillStyle = "#27ae60"; // 綠色平台
+        platforms.forEach(p => {
+            // 簡單陰影效果
+            ctx.fillStyle = "#219150";
+            ctx.fillRect(p.x, p.y+10, p.w, p.h-10);
+            ctx.fillStyle = "#2ecc71";
+            ctx.fillRect(p.x, p.y, p.w, p.h-5);
+        });
+        
+        // 畫玩家
+        ctx.font = "35px Arial";
+        ctx.textAlign = "center";
+        ctx.fillText(myAvatar, player.x + 20, player.y + 35);
+
+        // 更新 UI 分數
+        document.getElementById('score-display').innerText = Math.floor(score) + " m";
+
+        requestAnimationFrame(update);
+    }
+
+    function showGameOver() {
+        isGameOver = true;
+        document.getElementById('final-score').innerText = Math.floor(score);
+        document.getElementById('game-over-overlay').style.display = 'flex';
+    }
+
+    // ================= 答題系統 =================
+    window.openQuiz = () => {
+        isPaused = true;
+        
+        const overlay = document.getElementById('quiz-overlay');
+        const qText = document.getElementById('q-text');
+        const qOptions = document.getElementById('q-options');
+        
+        const q = questions[Math.floor(Math.random() * questions.length)];
+        qText.innerText = q.q;
+        qOptions.innerHTML = '';
+
+        q.o.forEach((opt, idx) => {
+            const btn = document.createElement('button');
+            btn.className = 'option-btn';
+            btn.innerText = opt;
+            btn.onclick = () => {
+                if (idx === q.a) {
+                    isPaused = false;
+                    player.vy = -35; // 火箭起飛
+                    overlay.style.display = 'none';
+                } else {
+                    alert("答錯了...無法發動引擎");
+                    isPaused = false;
+                    overlay.style.display = 'none';
+                }
+            };
+            qOptions.appendChild(btn);
+        });
+
+        overlay.style.display = 'flex';
+    };
+
+</script>
+</body>
+</html>
