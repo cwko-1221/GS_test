@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>公平測試跳躍遊戲 (自適應版)</title>
+    <style>
+        body { margin: 0; padding: 0; overflow: hidden; background-color: #f0f8ff; touch-action: none; font-family: "Microsoft JhengHei", sans-serif; }
+        canvas { display: block; }
+        #ui-layer { position: absolute; top: 10px; left: 10px; pointer-events: none; }
+        .score { font-size: 24px; font-weight: bold; color: #333; text-shadow: 2px 2px 0px #fff; }
+        #game-over { 
+            display: none; position: absolute; top: 50%; left: 50%; 
+            transform: translate(-50%, -50%); background: white; 
+            padding: 20px; border-radius: 10px; text-align: center; 
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3); pointer-events: auto;
+        }
+        button { padding: 10px 20px; font-size: 18px; cursor: pointer; background: #4CAF50; color: white; border: none; border-radius: 5px; }
+    </style>
+</head>
+<body>
+
+<div id="ui-layer">
+    <div class="score">分數: <span id="scoreVal">0</span></div>
+</div>
+
+<div id="game-over">
+    <h2>遊戲結束</h2>
+    <p>你的得分: <span id="finalScore">0</span></p>
+    <button onclick="resetGame()">重新開始</button>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+    // --- 1. 題目數據 (你提供的格式) ---
+    const questions = [
+        {q: "流感高峰期要？", o:["戴口罩", "不洗手", "熬夜"], a: 0},
+        {q: "火警打幾號？", o:["999", "911", "112"], a: 0},
+        {q: "哪種不是哺乳類？", o:["海豚", "鱷魚", "熊貓"], a: 1},
+        {q: "過馬路看？", o:["手機", "紅綠燈", "天空"], a: 1}
+    ];
+
+    // --- 2. 遊戲核心變數 ---
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    let platforms = [];
+    let player;
+    let score = 0;
+    let isGameOver = false;
+    let cameraY = 0;
+
+    // 物理參數 (Physics)
+    const gravity = 0.4;
+    const jumpStrength = -12; // 跳躍力度
+    // **核心算法：計算理論最大跳躍高度**
+    // 物理公式: h = v^2 / (2g)
+    const maxJumpHeight = (jumpStrength * jumpStrength) / (2 * gravity); 
+
+    // --- 3. 自適應螢幕設置 (Responsive) ---
+    function resizeCanvas() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        // 如果遊戲正在進行，可能需要重繪或暫停，這裡簡單處理
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas(); // 初始化
+
+    // --- 4. 遊戲物件類別 ---
+    class Player {
+        constructor() {
+            this.width = 30; // 基礎大小
+            this.height = 30;
+            this.x = canvas.width / 2;
+            this.y = canvas.height - 150;
+            this.vx = 0;
+            this.vy = 0;
+        }
+
+        update() {
+            // 水平移動 (簡單的滑鼠/觸控跟隨邏輯，或左右鍵)
+            // 這裡使用自動向螢幕中心靠攏的簡單邏輯或慣性
+            // 為了演示，我們稍後加上控制
+            
+            // 重力
+            this.vy += gravity;
+            this.y += this.vy;
+
+            // 左右邊界穿梭
+            if (this.x > canvas.width) this.x = 0;
+            if (this.x < -this.width) this.x = canvas.width;
+        }
+
+        jump() {
+            this.vy = jumpStrength;
+        }
+
+        draw() {
+            ctx.fillStyle = '#ff6b6b';
+            ctx.fillRect(this.x, this.y, this.width, this.height);
+            // 畫眼睛
+            ctx.fillStyle = 'white';
+            ctx.fillRect(this.x + 5, this.y + 5, 8, 8);
+            ctx.fillRect(this.x + 18, this.y + 5, 8, 8);
+        }
+    }
+
+    class Platform {
+        constructor(x, y) {
+            this.x = x;
+            this.y = y;
+            // **自適應寬度**：平台寬度是螢幕寬度的 15% (最少60px)
+            this.width = Math.max(60, canvas.width * 0.15); 
+            this.height = 15;
+            this.isBroken = false; // 未來可以加陷阱平台
+        }
+
+        draw() {
+            ctx.fillStyle = '#4ecdc4';
+            ctx.fillRect(this.x, this.y, this.width, this.height);
+            // 裝飾線條
+            ctx.fillStyle = '#45b7aa';
+            ctx.fillRect(this.x, this.y + 10, this.width, 5);
+        }
+    }
+
+    // --- 5. 輸入控制 ---
+    let inputX = 0;
+    // 支援滑鼠和觸控
+    function updateInput(clientX) {
+        // 讓玩家跟隨手指/滑鼠，但有平滑感
+        const targetX = clientX - player.width / 2;
+        player.x += (targetX - player.x) * 0.1; 
+    }
+
+    window.addEventListener('mousemove', e => updateInput(e.clientX));
+    window.addEventListener('touchmove', e => {
+        e.preventDefault();
+        updateInput(e.touches[0].clientX);
+    }, {passive: false});
+
+    // --- 6. 核心邏輯：生成平台 ---
+    function generatePlatforms() {
+        // 移除超出螢幕下方的平台
+        platforms = platforms.filter(p => p.y < cameraY + canvas.height);
+
+        // 找出最高的平台 (y值最小)
+        let highestY = canvas.height;
+        if (platforms.length > 0) {
+            highestY = platforms[platforms.length - 1].y;
+        }
+
+        // 當最高平台進入畫面生成區時，生成新的
+        while (highestY > cameraY - 100) {
+            // **核心修改：公平距離計算**
+            // 下一個平台的距離，介於 最小跳躍(30px) 到 最大跳躍高度的85% 之間
+            // 這保證了你一定跳得上去
+            const minGap = 50;
+            const safeMaxGap = maxJumpHeight * 0.85; 
+            const gap = minGap + Math.random() * (safeMaxGap - minGap);
+            
+            highestY -= gap;
+            
+            // x 軸隨機，但確保不會一半在螢幕外
+            const pWidth = Math.max(60, canvas.width * 0.15);
+            const x = Math.random() * (canvas.width - pWidth);
+            
+            platforms.push(new Platform(x, highestY));
+        }
+    }
+
+    // --- 7. 遊戲循環 ---
+    function init() {
+        player = new Player();
+        player.x = canvas.width / 2 - 15;
+        platforms = [];
+        
+        // 初始平台
+        for (let i = 0; i < 5; i++) {
+            platforms.push(new Platform(canvas.width/2 - 50, canvas.height - 100 - i * 100));
+        }
+        
+        score = 0;
+        cameraY = 0;
+        isGameOver = false;
+        document.getElementById('game-over').style.display = 'none';
+        requestAnimationFrame(loop);
+    }
+
+    function loop() {
+        if (isGameOver) return;
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // 1. 更新物理
+        player.update();
+
+        // 2. 鏡頭移動 (當玩家跳到螢幕中線以上)
+        if (player.y < cameraY + canvas.height * 0.5) {
+            const diff = (cameraY + canvas.height * 0.5) - player.y;
+            player.y += diff;
+            cameraY -= diff;
+            score += Math.floor(diff / 10);
+            document.getElementById('scoreVal').innerText = score;
+        }
+
+        // 3. 平台碰撞檢測
+        // 只在向下掉落時檢測
+        if (player.vy > 0) {
+            for (let p of platforms) {
+                // 簡單的 AABB 碰撞 (腳底碰到平台頂部)
+                if (
+                    player.x + player.width > p.x &&
+                    player.x < p.x + p.width &&
+                    player.y + player.height > p.y &&
+                    player.y + player.height < p.y + p.height + player.vy
+                ) {
+                    player.jump(); // 碰到就跳
+                    break;
+                }
+            }
+        }
+
+        // 4. 繪製物件
+        // 模擬鏡頭：所有物件繪製時都要減去 cameraY (但因為我們上面移動了 player.y 來模擬鏡頭，這裡只需畫相對位置)
+        // 修正：上面的鏡頭邏輯其實是將 player 固定，移動世界。
+        // 但為了簡單，這裡採用：Player y 變了，Platform y 相對不變，繪製時偏移
+        
+        // 這裡用更直觀的方法：我們移動了 player.y 和 cameraY，其實可以直接畫
+        // 為了讓平台看起來在移動，我們需要遍歷平台並加上 cameraY 的偏移效果? 
+        // 不，上面的邏輯其實是把 player "推回" 中線，同時 "cameraY" 變小 (負數越來越大代表往上)。
+        // 實際上平台生成時是根據 cameraY 生成的。
+        
+        // 讓我們修正繪製邏輯：
+        // 平台是絕對座標。CameraY 是視窗頂部的絕對 Y。
+        // 螢幕上的 Y = 物件絕對 Y - CameraY
+        
+        // 修正 init 裡的 player 位置邏輯
+        // 簡單化：CameraY 初始為 0。
+        
+        platforms.forEach(p => {
+             // 繪製座標 = 實際座標 - 鏡頭座標
+             const drawY = p.y - cameraY;
+             ctx.fillStyle = '#4ecdc4';
+             ctx.fillRect(p.x, drawY, p.width, p.height);
+             
+             // 裝飾
+             ctx.fillStyle = '#45b7aa';
+             ctx.fillRect(p.x, drawY + 10, p.width, 5);
+        });
+
+        const drawPlayerY = player.y - cameraY;
+        
+        // 畫玩家
+        ctx.fillStyle = '#ff6b6b';
+        ctx.fillRect(player.x, drawPlayerY, player.width, player.height);
+        // 眼睛
+        ctx.fillStyle = 'white';
+        ctx.fillRect(player.x + 5, drawPlayerY + 5, 8, 8);
+        ctx.fillRect(player.x + 18, drawPlayerY + 5, 8, 8);
+
+        // 5. 生成與清理
+        generatePlatforms();
+
+        // 6. 死亡判定 (掉出螢幕下方)
+        if (drawPlayerY > canvas.height) {
+            gameOver();
+        }
+
+        requestAnimationFrame(loop);
+    }
+
+    function gameOver() {
+        isGameOver = true;
+        document.getElementById('finalScore').innerText = score;
+        document.getElementById('game-over').style.display = 'block';
+    }
+
+    function resetGame() {
+        init();
+    }
+
+    // 啟動
+    init();
+
+</script>
+</body>
+</html>
