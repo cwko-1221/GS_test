@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>常識雲端賽 - V7.0 穩定版</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        body { font-family: '微軟正黑體', sans-serif; margin: 0; padding: 0; background-color: #f0f3f4; touch-action: none; user-select: none; -webkit-user-select: none; overflow: hidden; }
+        
+        /* --- 基礎樣式 --- */
+        .big-btn { padding: 15px 30px; font-size: 1.2rem; border: none; border-radius: 10px; cursor: pointer; color: white; transition: 0.2s; box-shadow: 0 4px 0 rgba(0,0,0,0.2); }
+        .big-btn:active { transform: translateY(4px); box-shadow: none; }
+        .green-btn { background: #2ecc71; }
+        
+        /* 1. 角色選擇頁 (入口) */
+        #role-select { display: flex; flex-direction: column; height: 100vh; width: 100vw; justify-content: center; align-items: center; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); gap: 20px; z-index: 9999; position: absolute; top: 0; left: 0; }
+        
+        /* 2. 老師端畫面 */
+        #host-screen { display: none; padding: 20px; background-color: #2c3e50; min-height: 100vh; color: white; box-sizing: border-box; width: 100vw; }
+        .host-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 2px solid #34495e; padding-bottom: 10px; }
+        #qr-container { background: white; padding: 10px; border-radius: 10px; }
+        
+        /* 排行榜樣式 */
+        #leaderboard { display: flex; flex-direction: column; gap: 10px; }
+        .rank-card { display: flex; align-items: center; background: #34495e; padding: 10px 20px; border-radius: 10px; position: relative; border: 1px solid #465c71; }
+        .rank-num { font-size: 1.5rem; font-weight: bold; width: 40px; color: #f1c40f; }
+        .rank-avatar { font-size: 2rem; margin-right: 15px; }
+        .rank-info { flex: 1; }
+        .rank-name { font-size: 1.2rem; font-weight: bold; }
+        .rank-score { font-size: 1rem; color: #bdc3c7; }
+        .rank-bar { height: 6px; background: #e74c3c; width: 0%; border-radius: 5px; margin-top: 5px; transition: width 0.5s; }
+
+        /* 3. 學生端畫面 */
+        #client-screen { display: none; height: 100vh; width: 100vw; background: #ecf0f1; overflow: hidden; position: relative; }
+        canvas { display: block; width: 100%; height: 100%; background: linear-gradient(to bottom, #87CEEB, #E0F7FA); }
+        
+        /* 遊戲 UI 層 */
+        #game-ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
+        #score-display { position: absolute; top: max(15px, env(safe-area-inset-top)); left: 15px; font-size: 1.8rem; font-weight: bold; color: #2c3e50; text-shadow: 2px 2px 0px white; }
+        #quiz-timer-display { position: absolute; top: max(15px, env(safe-area-inset-top)); right: 15px; font-size: 1.2rem; font-weight: bold; color: #e74c3c; background: rgba(255,255,255,0.8); padding: 5px 10px; border-radius: 15px;}
+
+        /* 控制按鈕 */
+        #controls { position: absolute; bottom: 0; width: 100%; height: 140px; pointer-events: auto; display: flex; justify-content: space-between; padding: 0 30px; box-sizing: border-box; align-items: center; padding-bottom: env(safe-area-inset-bottom); }
+        .control-btn { width: 90px; height: 90px; background: rgba(0,0,0,0.1); border-radius: 50%; font-size: 2.5rem; border: 2px solid white; color: white; display: flex; justify-content: center; align-items: center; touch-action: manipulation; }
+        .control-btn:active { background: rgba(0,0,0,0.4); transform: scale(0.95); }
+
+        /* 火箭按鈕 */
+        #power-btn { 
+            position: absolute; bottom: 160px; right: 30px; width: 75px; height: 75px; 
+            background: #e74c3c; border-radius: 50%; border: 4px solid white; color: white; font-size: 2rem; 
+            display: flex; justify-content: center; align-items: center; pointer-events: auto; 
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3); transition: 0.3s;
+            filter: grayscale(100%); opacity: 0.6; transform: scale(0.9);
+            margin-bottom: env(safe-area-inset-bottom);
+        }
+        #power-btn.active { filter: grayscale(0%); opacity: 1; transform: scale(1.1); animation: pulse 1s infinite; cursor: pointer; }
+
+        /* --- 登入畫面 (關鍵修復: Z-Index 提高) --- */
+        #login-box { 
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 5000; 
+            background: rgba(44, 62, 80, 1); display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 20px;
+        }
+        input { padding: 15px; font-size: 1.3rem; text-align: center; border-radius: 10px; border: none; width: 70%; max-width: 300px; }
+        
+        .avatar-btn { font-size: 2.5rem; background: rgba(255,255,255,0.1); border: 2px solid transparent; border-radius: 10px; cursor: pointer; padding: 10px; transition: 0.2s; }
+        .avatar-btn.selected { border-color: #f1c40f; background: rgba(255,255,255,0.3); transform: scale(1.1); }
+
+        /* 彈窗系統 */
+        .overlay { 
+            display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
+            background: rgba(0,0,0,0.85); z-index: 6000; justify-content: center; align-items: center; flex-direction: column; pointer-events: auto;
+        }
+        .modal-box { background: white; padding: 25px; border-radius: 15px; width: 85%; max-width: 350px; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.5); border: 5px solid #3498db;}
+        .option-btn { display: block; width: 100%; padding: 15px; margin: 10px 0; background: #3498db; color: white; border: none; border-radius: 8px; font-size: 1.2rem; cursor: pointer; }
+        
+        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
+    </style>
+</head>
+<body>
+
+    <div id="role-select">
+        <h1 style="color:white; font-size: 2.5rem; text-shadow: 0 2px 5px rgba(0,0,0,0.2);">☁️ 常識雲端賽</h1>
+        <button id="btn-i-am-teacher" class="big-btn green-btn">我是老師 (開啟排行榜)</button>
+        <p style="color:white; opacity: 0.8; margin-top:20px">學生請掃描 QR Code 加入</p>
+    </div>
+
+    <div id="host-screen">
+        <div class="host-header">
+            <div>
+                <h1>🏆 即時排行榜</h1>
+                <h3 style="color:#bdc3c7">房間 ID: <span id="room-id" style="color:#f1c40f">...</span></h3>
+            </div>
+            <div id="qr-container">
+                <div id="qrcode"></div>
+            </div>
+        </div>
+        <div id="leaderboard"></div>
+    </div>
+
+    <div id="client-screen">
+        <canvas id="gameCanvas"></canvas>
+        
+        <div id="game-ui">
+            <div id="score-display">0 m</div>
+            <div id="quiz-timer-display">下題: 10s</div>
+            <div id="power-btn">🚀</div>
+            <div id="controls">
+                <div id="btn-left" class="control-btn">⬅️</div>
+                <div id="btn-right" class="control-btn">➡️</div>
+            </div>
+        </div>
+
+        <div id="login-box">
+            <h2 style="color:white">準備起飛！</h2>
+            <div style="font-size:4rem; margin-bottom:10px;" id="avatar-preview">🐵</div>
+            <div style="display:flex; gap:15px; margin-bottom:20px;">
+                <button class="avatar-btn selected" data-char="🐵">🐵</button>
+                <button class="avatar-btn" data-char="🐰">🐰</button>
+                <button class="avatar-btn" data-char="🦊">🦊</button>
+                <button class="avatar-btn" data-char="🐷">🐷</button>
+            </div>
+            <input type="text" id="username" placeholder="輸入你的名字">
+            <button id="btn-start-game" class="big-btn green-btn" style="margin-top:20px; width: 70%;">開始遊戲</button>
+        </div>
+
+        <div id="game-over-overlay" class="overlay">
+            <div class="modal-box">
+                <h2 style="color:#e74c3c">😵 掉下來了！</h2>
+                <p style="font-size:1.2rem; color:#34495e">你的高度: <span id="final-score" style="font-weight:bold; font-size:2rem">0</span> m</p>
+                <br>
+                <button id="btn-retry" class="big-btn green-btn" style="width:100%">再玩一次 🔄</button>
+            </div>
+        </div>
+
+        <div id="quiz-overlay" class="overlay">
+            <div class="modal-box">
+                <div style="color:#e74c3c; font-weight:bold; margin-bottom:10px;">⚡ 能量補充考核 ⚡</div>
+                <h3 id="q-text" style="color:#2c3e50; margin-bottom:15px">題目載入中...</h3>
+                <div id="q-options"></div>
+            </div>
+        </div>
+    </div>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+    import { getFirestore, collection, doc, setDoc, onSnapshot, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+    // ==========================================
+    // ⚠️⚠️⚠️ 老師請務必修改這裡的 Config ⚠️⚠️⚠️
+    // ==========================================
+const firebaseConfig = {
+  apiKey: "AIzaSyCpUjL4C66wWr0mP4Xz_g_FvACvjObaUT0",
+  authDomain: "gsmoney-65f2f.firebaseapp.com",
+  projectId: "gsmoney-65f2f",
+  storageBucket: "gsmoney-65f2f.firebasestorage.app",
+  messagingSenderId: "176138167950",
+  appId: "1:176138167950:web:48057a0e2cc89612f30bdf",
+  measurementId: "G-BKB004KPBN"
+};
+
+    // --- 安全檢查: 確保老師有設定 Config ---
+    let app, db;
+    try {
+        if (firebaseConfig.apiKey === "YOUR_API_KEY" || firebaseConfig.apiKey.includes("YOUR_")) {
+            throw new Error("API Key 尚未設定");
+        }
+        app = initializeApp(firebaseConfig);
+        db = getFirestore(app);
+        console.log("Firebase 連線成功");
+    } catch (e) {
+        alert("⛔ 錯誤：Firebase 設定未填寫！\n請老師用記事本打開檔案，填入 firebaseConfig。");
+        console.error("Firebase Init Error:", e);
+        // 停止執行後續代碼
+        throw e; 
+    }
+
+    // ================= 全局變數 =================
+    let roomId = null;
+    let myId = "p_" + Math.random().toString(36).substr(2, 6);
+    let myAvatar = "🐵";
+    let myName = "";
+    
+    // 檢查網址參數 (判斷是否為學生掃碼進入)
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('room')) {
+        roomId = urlParams.get('room');
+        initStudentUI();
+    }
+
+    // ================= DOM 事件綁定 (修復按鈕沒反應問題) =================
+    // 我們使用 addEventListener 來確保即使在 module 模式下也能觸發
+    
+    // 1. 老師按鈕
+    document.getElementById('btn-i-am-teacher').addEventListener('click', initTeacher);
+    
+    // 2. 學生選頭像
+    document.querySelectorAll('.avatar-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            // 移除所有 selected
+            document.querySelectorAll('.avatar-btn').forEach(b => b.classList.remove('selected'));
+            // 選中當前
+            e.target.classList.add('selected');
+            // 更新變數與預覽
+            myAvatar = e.target.getAttribute('data-char');
+            document.getElementById('avatar-preview').innerText = myAvatar;
+        });
+    });
+
+    // 3. 學生開始遊戲按鈕
+    document.getElementById('btn-start-game').addEventListener('click', firstStart);
+
+    // 4. 重試按鈕
+    document.getElementById('btn-retry').addEventListener('click', resetGame);
+
+    // 5. 火箭按鈕
+    document.getElementById('power-btn').addEventListener('click', useRocket);
+
+    // 6. 左右控制 (觸控與滑鼠)
+    const btnLeft = document.getElementById('btn-left');
+    const btnRight = document.getElementById('btn-right');
+
+    const handleInput = (dir, active) => {
+        if (dir === 'left') window.inputLeft = active;
+        if (dir === 'right') window.inputRight = active;
+    };
+
+    // 左鍵
+    btnLeft.addEventListener('touchstart', (e) => { e.preventDefault(); handleInput('left', true); });
+    btnLeft.addEventListener('touchend', (e) => { e.preventDefault(); handleInput('left', false); });
+    btnLeft.addEventListener('mousedown', () => handleInput('left', true));
+    btnLeft.addEventListener('mouseup', () => handleInput('left', false));
+    
+    // 右鍵
+    btnRight.addEventListener('touchstart', (e) => { e.preventDefault(); handleInput('right', true); });
+    btnRight.addEventListener('touchend', (e) => { e.preventDefault(); handleInput('right', false); });
+    btnRight.addEventListener('mousedown', () => handleInput('right', true));
+    btnRight.addEventListener('mouseup', () => handleInput('right', false));
+
+
+    // ================= 老師端邏輯 =================
+    function initTeacher() {
+        document.getElementById('role-select').style.display = 'none';
+        document.getElementById('host-screen').style.display = 'block';
+
+        roomId = Math.floor(1000 + Math.random() * 9000).toString();
+        document.getElementById('room-id').innerText = roomId;
+
+        const url = window.location.href.split('?')[0] + "?room=" + roomId;
+        // 清空舊的 QR code (如果有)
+        document.getElementById("qrcode").innerHTML = "";
+        new QRCode(document.getElementById("qrcode"), { text: url, width: 120, height: 120 });
+
+        const playersRef = collection(db, 'rooms', roomId, 'players');
+        onSnapshot(playersRef, (snapshot) => {
+            const players = [];
+            snapshot.forEach(doc => players.push(doc.data()));
+            players.sort((a, b) => b.score - a.score);
+            updateLeaderboard(players);
+        });
+    };
+
+    function updateLeaderboard(players) {
+        const board = document.getElementById('leaderboard');
+        board.innerHTML = ""; 
+        const maxScore = players.length > 0 ? Math.max(players[0].score, 100) : 100;
+        players.forEach((p, index) => {
+            const widthPercent = Math.min((p.score / maxScore) * 100, 100);
+            const card = document.createElement('div');
+            card.className = 'rank-card';
+            card.innerHTML = `
+                <div class="rank-num">${index + 1}</div>
+                <div class="rank-avatar">${p.avatar}</div>
+                <div class="rank-info">
+                    <div style="display:flex; justify-content:space-between;">
+                        <span class="rank-name">${p.name}</span>
+                        <span class="rank-score">${Math.floor(p.score)} m</span>
+                    </div>
+                    <div class="rank-bar" style="width: ${widthPercent}%;"></div>
+                </div>
+            `;
+            board.appendChild(card);
+        });
+    }
+
+    // ================= 學生端邏輯 =================
+    
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    let player = { x: 0, y: 0, w: 40, h: 40, vx: 0, vy: 0 };
+    let platforms = [];
+    let cameraY = 0;
+    let score = 0;
+    let isGameOver = false;
+    let isPaused = false;
+    let hasRocket = false;
+    let quizInterval = null;
+    let quizTimerValue = 10;
+    
+    // 輸入狀態
+    window.inputLeft = false;
+    window.inputRight = false;
+    
+    const questions = [
+        {q: "流感高峰期要？", o:["戴口罩", "不洗手", "熬夜"], a: 0},
+        {q: "火警打幾號？", o:["999", "911", "112"], a: 0},
+        {q: "哪種不是哺乳類？", o:["海豚", "鱷魚", "熊貓"], a: 1},
+        {q: "過馬路看？", o:["手機", "紅綠燈", "天空"], a: 1},
+        {q: "一天幾小時？", o:["12", "24", "48"], a: 1}
+    ];
+
+    function initStudentUI() {
+        document.getElementById('role-select').style.display = 'none';
+        document.getElementById('client-screen').style.display = 'block';
+        resizeCanvas();
+    }
+
+    function resizeCanvas() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resizeCanvas);
+
+    async function firstStart() {
+        const nameInput = document.getElementById('username');
+        const name = nameInput.value.trim();
+        if (!name) return alert("請輸入名字");
+        myName = name;
+        
+        // 隱藏登入框
+        document.getElementById('login-box').style.display = 'none';
+        
+        try {
+            await setDoc(doc(db, 'rooms', roomId, 'players', myId), {
+                name: myName, avatar: myAvatar, score: 0
+            });
+        } catch (e) {
+            console.error("Firebase Write Error:", e);
+            alert("連線錯誤，請檢查網絡或 Firebase 設定");
+            return;
+        }
+
+        resetGame();
+        requestAnimationFrame(update);
+        
+        setInterval(() => {
+            if (!isGameOver && score > 0) {
+                updateDoc(doc(db, 'rooms', roomId, 'players', myId), { score: Math.floor(score) });
+            }
+        }, 1500);
+
+        startQuizTimer();
+    };
+
+    function startQuizTimer() {
+        if (quizInterval) clearInterval(quizInterval);
+        quizTimerValue = 10;
+        quizInterval = setInterval(() => {
+            if (isGameOver) return;
+            if (!isPaused) {
+                quizTimerValue--;
+                document.getElementById('quiz-timer-display').innerText = `下題: ${quizTimerValue}s`;
+                if (quizTimerValue <= 0) {
+                    triggerAutoQuiz();
+                    quizTimerValue = 10;
+                }
+            }
+        }, 1000);
+    }
+
+    function resetGame() {
+        resizeCanvas();
+        isGameOver = false;
+        isPaused = false;
+        score = 0;
+        cameraY = 0;
+        hasRocket = false;
+        updateRocketUI();
+        quizTimerValue = 10;
+        
+        document.getElementById('game-over-overlay').style.display = 'none';
+        document.getElementById('score-display').innerText = "0 m";
+
+        player.x = canvas.width / 2 - 20;
+        player.y = canvas.height - 150;
+        player.vx = 0;
+        player.vy = 0;
+
+        platforms = [];
+        // 安全地板
+        platforms.push({ x: 0, y: canvas.height - 50, w: canvas.width, h: 20 });
+        
+        // 初始平台
+        let startY = canvas.height - 50;
+        for (let i = 0; i < 12; i++) {
+            startY -= (60 + Math.random() * 50);
+            platforms.push({
+                x: Math.random() * (canvas.width - 80),
+                y: startY,
+                w: 80, h: 15
+            });
+        }
+        
+        updateDoc(doc(db, 'rooms', roomId, 'players', myId), { score: 0 });
+    };
+
+    function update() {
+        if (isGameOver || isPaused) {
+            requestAnimationFrame(update);
+            return;
+        }
+
+        ctx.fillStyle = "#E0F7FA";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        if (window.inputLeft) player.vx = -4.5;
+        else if (window.inputRight) player.vx = 4.5;
+        else player.vx *= 0.85;
+
+        player.x += player.vx;
+        player.vy += 0.4;
+        player.y += player.vy;
+
+        if (player.x < -30) player.x = canvas.width;
+        if (player.x > canvas.width) player.x = -30;
+
+        // 碰撞檢測
+        if (player.vy > 0) {
+            platforms.forEach(p => {
+                if (
+                    player.x + 20 > p.x && 
+                    player.x + 20 < p.x + p.w &&
+                    player.y + 40 > p.y && 
+                    player.y + 40 < p.y + p.h + 18 
+                ) {
+                    player.vy = -10.5;
+                }
+            });
+        }
+
+        // 相機移動與平台生成
+        if (player.y < canvas.height / 2) {
+            let diff = (canvas.height / 2) - player.y;
+            player.y = canvas.height / 2;
+            cameraY += diff;
+            score += diff / 10;
+            
+            platforms.forEach(p => p.y += diff);
+            platforms = platforms.filter(p => p.y < canvas.height);
+            
+            // 智能生成
+            let highestY = canvas.height;
+            if (platforms.length > 0) highestY = Math.min(...platforms.map(p => p.y));
+            
+            while (highestY > -50) {
+                let gap = 60 + Math.random() * 50; 
+                let newY = highestY - gap;
+                platforms.push({
+                    x: Math.random() * (canvas.width - 80),
+                    y: newY,
+                    w: 80, h: 15
+                });
+                highestY = newY;
+            }
+        }
+
+        if (player.y > canvas.height) {
+            showGameOver();
+        }
+
+        // 繪圖
+        ctx.fillStyle = "#27ae60";
+        platforms.forEach(p => {
+            ctx.fillStyle = "#219150"; ctx.fillRect(p.x, p.y+10, p.w, p.h-10);
+            ctx.fillStyle = "#2ecc71"; ctx.fillRect(p.x, p.y, p.w, p.h-5);
+        });
+        
+        ctx.font = "35px Arial";
+        ctx.textAlign = "center";
+        ctx.fillText(myAvatar, player.x + 20, player.y + 35);
+
+        document.getElementById('score-display').innerText = Math.floor(score) + " m";
+        requestAnimationFrame(update);
+    }
+
+    function showGameOver() {
+        isGameOver = true;
+        document.getElementById('final-score').innerText = Math.floor(score);
+        document.getElementById('game-over-overlay').style.display = 'flex';
+    }
+
+    function triggerAutoQuiz() {
+        isPaused = true;
+        const overlay = document.getElementById('quiz-overlay');
+        const qText = document.getElementById('q-text');
+        const qOptions = document.getElementById('q-options');
+        const q = questions[Math.floor(Math.random() * questions.length)];
+        qText.innerText = q.q;
+        qOptions.innerHTML = '';
+
+        q.o.forEach((opt, idx) => {
+            const btn = document.createElement('button');
+            btn.className = 'option-btn';
+            btn.innerText = opt;
+            // 使用 addEventListener 避免作用域問題
+            btn.addEventListener('click', () => {
+                if (idx === q.a) {
+                    hasRocket = true;
+                    updateRocketUI();
+                    isPaused = false;
+                    overlay.style.display = 'none';
+                } else {
+                    alert("答錯了！沒有獲得火箭。");
+                    isPaused = false;
+                    overlay.style.display = 'none';
+                }
+            });
+            qOptions.appendChild(btn);
+        });
+        overlay.style.display = 'flex';
+    }
+
+    function useRocket() {
+        if (!hasRocket) return;
+        player.vy = -35; 
+        hasRocket = false;
+        updateRocketUI();
+    }
+
+    function updateRocketUI() {
+        const btn = document.getElementById('power-btn');
+        if (hasRocket) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    }
+
+</script>
+</body>
+</html>
